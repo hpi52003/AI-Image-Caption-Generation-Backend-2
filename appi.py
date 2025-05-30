@@ -1,13 +1,10 @@
 from fastapi import FastAPI, File, UploadFile, Query # type: ignore
 from fastapi.middleware.cors import CORSMiddleware # type: ignore
 from fastapi.responses import FileResponse, JSONResponse # type: ignore
-from PIL import Image, UnidentifiedImageError # type: ignore
-import io
-import torch # type: ignore
-from transformers import BlipProcessor, BlipForConditionalGeneration
 from googletrans import Translator # type: ignore
 from gtts import gTTS # type: ignore
 from typing import Optional
+import requests # type: ignore
 import os
 
 app = FastAPI()
@@ -21,14 +18,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model & processor
-processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+# Hugging Face Inference API
+HF_API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")  # Store token securely in environment variables
 
-# Translator
+headers = {"Authorization": f"Bearer {HF_API_TOKEN}"} if HF_API_TOKEN else {}
+
+# Translator instance
 translator = Translator()
 
-# Global caption state
+# Globals to hold latest caption
 translated_caption_global = ""
 lang_global = "en"
 
@@ -37,30 +36,29 @@ async def generate_caption(file: UploadFile = File(...), lang: Optional[str] = Q
     global translated_caption_global, lang_global
 
     try:
-        # Read and open image
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-    except UnidentifiedImageError:
-        return JSONResponse(status_code=400, content={"error": "Unsupported image format"})
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Error loading image: {str(e)}"})
+        image_bytes = await file.read()
+        response = requests.post(
+            HF_API_URL,
+            headers=headers,
+            files={"file": (file.filename, image_bytes)}
+        )
 
-    try:
-        # Generate caption
-        inputs = processor(image, return_tensors="pt")
-        with torch.no_grad():
-            out = model.generate(**inputs)
-            caption = processor.decode(out[0], skip_special_tokens=True)
-        print("Generated caption:", caption)
+        if response.status_code != 200:
+            return JSONResponse(status_code=500, content={"error": "Model API error or quota exceeded"})
+
+        result = response.json()
+        if isinstance(result, list) and "generated_text" in result[0]:
+            caption = result[0]["generated_text"]
+        else:
+            return JSONResponse(status_code=500, content={"error": "Invalid model response"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Caption generation error: {str(e)}"})
 
-    # Translate caption if needed
+    # Translate if necessary
     translated_caption = caption
     if lang != "en":
         try:
-            translation = translator.translate(caption, dest=lang)
-            translated_caption = translation.text
+            translated_caption = translator.translate(caption, dest=lang).text
         except Exception as e:
             translated_caption = f"[Translation error: {str(e)}]"
 
@@ -77,12 +75,13 @@ async def get_audio():
     global translated_caption_global, lang_global
 
     if not translated_caption_global:
-        return JSONResponse(status_code=400, content={"error": "No caption available to generate audio."})
+        return JSONResponse(status_code=400, content={"error": "No caption available for audio generation"})
 
     try:
-        audio_path = "caption.mp3"
-        tts = gTTS(text=translated_caption_global, lang=lang_global)
-        tts.save(audio_path)
-        return FileResponse(audio_path, media_type="audio/mpeg", filename="caption.mp3")
+        path = "caption.mp3"
+        gTTS(text=translated_caption_global, lang=lang_global).save(path)
+        return FileResponse(path, media_type="audio/mpeg", filename="caption.mp3")
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Text-to-speech error: {str(e)}"})
+
+        
