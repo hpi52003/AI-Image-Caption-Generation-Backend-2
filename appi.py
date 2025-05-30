@@ -1,10 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, Query # type: ignore
-from fastapi.middleware.cors import CORSMiddleware # type: ignore
-from fastapi.responses import FileResponse, JSONResponse # type: ignore
-from googletrans import Translator # type: ignore
-from gtts import gTTS # type: ignore
+from fastapi import FastAPI, File, UploadFile, Query  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from fastapi.responses import FileResponse, JSONResponse  # type: ignore
+from googletrans import Translator  # type: ignore
+from gtts import gTTS  # type: ignore
 from typing import Optional
-import requests # type: ignore
+import requests  # type: ignore
 import os
 
 app = FastAPI()
@@ -17,6 +17,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root endpoint to prevent 404 on base URL
+@app.get("/")
+def read_root():
+    return {"message": "Image Captioning API is live"}
 
 # Hugging Face Inference API
 HF_API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
@@ -84,4 +89,6 @@ async def get_audio():
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Text-to-speech error: {str(e)}"})
 
+
+       
         
