@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-pillow
-torch
-transformers
+python-multipart
+requests
 googletrans==4.0.0-rc1
 gTTS
